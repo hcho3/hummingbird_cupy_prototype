@@ -190,7 +190,7 @@ def infer(X_test: cp.ndarray, *, processed_rf):
 
 def main():
     X, y = make_regression(n_features=100, n_informative=20, random_state=0)
-    clf = RandomForestRegressor(n_estimators=100, max_depth=3, random_state=0)
+    clf = RandomForestRegressor(n_estimators=1000, max_depth=3, random_state=0)
     clf.fit(X, y)
 
     tl_model = treelite.sklearn.import_model(clf)
@@ -199,8 +199,7 @@ def main():
     processed_rf = process_rf(obj["trees"], n_features=X.shape[1])
 
     rng = cp.random.default_rng(seed=0)
-    X_test = rng.standard_normal((50000, X.shape[1]))
-    X_test = cp.asfortranarray(X_test)
+    X_test = rng.standard_normal((10000, X.shape[1]))
     expected_leaf_output = treelite.gtil.predict_leaf(tl_model, X_test.get())
 
     np.testing.assert_array_equal(
@@ -208,18 +207,27 @@ def main():
         expected_leaf_output,
     )
 
+    # Warm-up
+    n_trials = 20
+    X_test = cp.asfortranarray(X_test)
+    for _ in range(n_trials):
+        _ = infer(X_test, processed_rf=processed_rf).get().astype("float64")
+
+    # Hummingbird
     tstart = time.perf_counter()
-    pred = infer(X_test, processed_rf=processed_rf).get().astype("float64")
+    for _ in range(n_trials):
+        pred = infer(X_test, processed_rf=processed_rf).get().astype("float64")
     tend = time.perf_counter()
-    print(f"Hummingbird: Time elapsed = {tend - tstart} sec")
+    print(f"Hummingbird: Time elapsed = {(tend - tstart) / n_trials} sec")
     np.testing.assert_array_equal(pred, expected_leaf_output)
 
     fm = ForestInference.load_from_treelite_model(tl_model)
     X_test = cp.ascontiguousarray(X_test)
     tstart = time.perf_counter()
-    pred = fm.apply(X_test).get().astype("float64")
+    for _ in range(n_trials):
+        pred = fm.apply(X_test).get().astype("float64")
     tend = time.perf_counter()
-    print(f"FIL: Time elapsed = {tend - tstart} sec")
+    print(f"FIL: Time elapsed = {(tend - tstart) / n_trials} sec")
 
 
 if __name__ == "__main__":
